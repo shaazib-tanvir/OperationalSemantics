@@ -15,7 +15,7 @@ deriving Repr
 
 structure Var where
   ident : String
-deriving Repr
+deriving Repr, DecidableEq
 
 inductive UnaryOp where
   | not : UnaryOp
