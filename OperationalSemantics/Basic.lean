@@ -158,4 +158,53 @@ if x > 2 then
 else x := x - 1
 ⟫
 
+inductive Value where
+  | bool : Bool → Value
+  | nat : Nat → Value
+deriving Repr
+
+def State := Var → Value
+def SProp := State → Prop
+
+def Literal.eval (l : Literal) : Value :=
+  match l with
+  | bool b => Value.bool b
+  | nat n => Value.nat n
+
+-- typeError currently takes unit but it should probably take info to synthesize the error message
+-- i don't care enough for that rn so future me's problem =)
+def Unary.applyM [Monad m] (u : UnaryOp) (x : Value) (typeError : Unit → m Value) : m Value := do
+  match u, x with
+  | .not, .bool b => return Value.bool (!b)
+  | _, _ => return ← typeError ()
+
+def Binary.applyM [Monad m] (b : BinaryOp) (x : Value) (y : Value) (typeError : Unit → m Value) : m Value := do
+  match b, x, y with
+  | .add, .nat u, .nat v => return Value.nat (u + v)
+  | .sub, .nat u, .nat v => return Value.nat (u - v)
+  | .or, .bool b₀, .bool b₁ => return Value.bool (b₀ || b₁)
+  | .and, .bool b₀, .bool b₁ => return Value.bool (b₀ && b₁)
+  | _, _, _ => return ← typeError ()
+
+def Expr.evalM [Monad m] (e : Expr) (s : State) (typeError : Unit → m Value) : m Value := do
+  match e with
+  | lit l => return l.eval
+  | var v => return s v
+  | unary u e => return ← Unary.applyM u (← Expr.evalM e s typeError) typeError
+  | binary b e₀ e₁ =>
+    return ← Binary.applyM b (← Expr.evalM e₀ s typeError) (← Expr.evalM e₁ s typeError) typeError
+
+def Expr.eval? (e : Expr) (s : State) : Option Value :=
+  Expr.evalM e s (fun _ => none)
+
+syntax (name := evalExpr) "⟦" while_expr ";" term "⟧" : term
+
+macro_rules
+  | `(⟦$e:while_expr ; $s:term⟧) => `(Expr.eval? (test_while_expr $e) $s)
+
+syntax (name := evalExpr') "⟦" term ";" term "⟧" : term
+
+macro_rules
+  | `(⟦$e:term ; $s:term⟧) => `(Expr.eval? $e $s)
+
 end WHILE
