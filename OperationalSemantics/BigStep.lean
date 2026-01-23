@@ -33,4 +33,7 @@ infixl:60 " ▷ " => BigStep
 
 theorem skip_state_invariant (s : State) : (⟪ skip ⟫, s) ▷ s := by constructor
 
+example : (⟪ skip ⟫, {x ← 2, y ← 2}) ▷ {y ← 2, x ← 2} := by
+  apply skip_state_invariant
+
 end WHILE

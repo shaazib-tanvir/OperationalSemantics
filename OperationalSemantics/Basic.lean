@@ -150,7 +150,7 @@ partial def elabProgram (stx : Syntax) : MetaM Lean.Expr :=
     return mkAppN (.const ``Program.while []) #[← elabExpr b, ← elabProgram s]
   | _ => Lean.Elab.throwUnsupportedSyntax
 
-elab "⟪" p:while_program "⟫" : term => elabProgram p
+elab "⟪ " p:while_program " ⟫" : term => elabProgram p
 
 #eval ⟪
 if x > 2 then
@@ -158,6 +158,8 @@ if x > 2 then
   y := x
 else x := x - 1
 ⟫
+
+#check ⟪ skip ⟫
 
 inductive Value where
   | bool : Bool → Value
@@ -198,7 +200,7 @@ def Expr.evalM [Monad m] (e : Expr) (s : State) (typeError : Unit → m Value) :
 def Expr.eval? (e : Expr) (s : State) : Option Value :=
   Expr.evalM e s (fun _ => none)
 
-syntax (name := evalExpr') "⟦" term ";" term "⟧" : term
+syntax (name := evalExpr) "⟦" term ";" term "⟧" : term
 
 macro_rules
   | `(⟦$e:term ; $s:term⟧) => `(Expr.eval? $e $s)
@@ -208,34 +210,44 @@ syntax ident " ← " while_lit : state_decl
 
 syntax (name := state_expr) "{" state_decl,* "}" : term
 
-#check Option.elim
+def evalStateExpr (litList : List (String × Literal)) : State :=
+  fun v => match (litList.find? (fun x => x.fst = v.ident)) with
+  | .none => Value.nat 0
+  | .some y => y.snd.eval
+
 open Lean Lean.Meta in
 def elabStateExpr (stx : Syntax) : MetaM Lean.Expr := do
   match stx with
   | `(state_expr| { $sdecs:state_decl,* }) =>
-    let mut litMap := @Std.HashMap.emptyWithCapacity String Lean.Expr
+    let mut litList := []
     for stx in sdecs.getElems do
       match stx with
         | `(state_decl| $x:ident ← $l:while_lit) =>
-          litMap := litMap.insert x.getId.toString (← elabLit l)
+          litList := litList.insert (← mkAppM ``Prod.mk #[mkStrLit x.getId.toString, (← elabLit l)])
         | _ => continue
 
     let prodType := (← mkAppM ``Prod #[.const ``String [], .const ``Literal []])
-    let litList := ← mkListLit prodType (← (litMap.toArray.mapM (fun x => mkAppM ``Prod.mk #[mkStrLit x.fst, x.snd]))).toList
-    IO.println litList
-    return ← withLocalDecl `x .default (.const ``Var []) fun x => do
-      let searchStr := ← mkAppM ``Var.ident #[x]
-      let searchFn := ← withLocalDecl `y .default prodType fun y => do
-        mkLambdaFVars #[y] (← mkAppM ``BEq.beq #[searchStr, ← mkAppM ``Prod.fst #[y]])
-      let result := ← mkAppM ``List.find? #[searchFn, litList]
-      let default := ← mkAppM ``Value.nat #[mkNatLit 0]
-      let litEval := ← withLocalDecl `l .default prodType fun z => do
-        mkLambdaFVars #[z] (← mkAppM ``Literal.eval #[← mkAppM ``Prod.snd #[z]])
-      let body := mkAppM ``Option.elim #[result, default, litEval]
-      mkLambdaFVars #[x] (← body)
-    /- return ← Lean.Elab.throwUnsupportedSyntax -/
+    let exprList := ← mkListLit prodType litList
+    return ← mkAppM ``evalStateExpr #[exprList]
   | _ => return ← Lean.Elab.throwUnsupportedSyntax
 
+open Lean in
+@[app_unexpander evalStateExpr]
+def unexpandEvalStateExpr : PrettyPrinter.Unexpander
+  | `($_ [$[($x:str, $y:term)],*]) => do
+    let x := x.reverse.map fun str => Lean.mkIdent (.mkStr1 str.getString)
+    let y ← y.reverse.mapM fun term => do
+      match term with
+      | `(Literal.nat $n:num) => return ← `(while_lit| $n:num)
+      | `(Literal.bool true) => return ← `(while_lit| T)
+      | `(Literal.bool false) => return ← `(while_lit| ⊥)
+      | _ => throw ()
+
+    `({$[$x:ident ← $y:while_lit],*})
+  | _ => throw ()
+
+#eval test_while_lit T
 elab s:state_expr : term => elabStateExpr s
-#eval ({x ← 2, y ← T}) (Var.mk "y")
+#check ({x ← 2, y ← T})
+
 end WHILE
