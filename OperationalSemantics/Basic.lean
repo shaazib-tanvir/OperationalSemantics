@@ -1,5 +1,6 @@
 import Lean
 import Lean.Meta
+import Std
 
 namespace WHILE
 
@@ -197,14 +198,44 @@ def Expr.evalM [Monad m] (e : Expr) (s : State) (typeError : Unit → m Value) :
 def Expr.eval? (e : Expr) (s : State) : Option Value :=
   Expr.evalM e s (fun _ => none)
 
-syntax (name := evalExpr) "⟦" while_expr ";" term "⟧" : term
-
-macro_rules
-  | `(⟦$e:while_expr ; $s:term⟧) => `(Expr.eval? (test_while_expr $e) $s)
-
 syntax (name := evalExpr') "⟦" term ";" term "⟧" : term
 
 macro_rules
   | `(⟦$e:term ; $s:term⟧) => `(Expr.eval? $e $s)
 
+declare_syntax_cat state_decl
+syntax ident " ← " while_lit : state_decl
+
+syntax (name := state_expr) "{" state_decl,* "}" : term
+
+#check Option.elim
+open Lean Lean.Meta in
+def elabStateExpr (stx : Syntax) : MetaM Lean.Expr := do
+  match stx with
+  | `(state_expr| { $sdecs:state_decl,* }) =>
+    let mut litMap := @Std.HashMap.emptyWithCapacity String Lean.Expr
+    for stx in sdecs.getElems do
+      match stx with
+        | `(state_decl| $x:ident ← $l:while_lit) =>
+          litMap := litMap.insert x.getId.toString (← elabLit l)
+        | _ => continue
+
+    let prodType := (← mkAppM ``Prod #[.const ``String [], .const ``Literal []])
+    let litList := ← mkListLit prodType (← (litMap.toArray.mapM (fun x => mkAppM ``Prod.mk #[mkStrLit x.fst, x.snd]))).toList
+    IO.println litList
+    return ← withLocalDecl `x .default (.const ``Var []) fun x => do
+      let searchStr := ← mkAppM ``Var.ident #[x]
+      let searchFn := ← withLocalDecl `y .default prodType fun y => do
+        mkLambdaFVars #[y] (← mkAppM ``BEq.beq #[searchStr, ← mkAppM ``Prod.fst #[y]])
+      let result := ← mkAppM ``List.find? #[searchFn, litList]
+      let default := ← mkAppM ``Value.nat #[mkNatLit 0]
+      let litEval := ← withLocalDecl `l .default prodType fun z => do
+        mkLambdaFVars #[z] (← mkAppM ``Literal.eval #[← mkAppM ``Prod.snd #[z]])
+      let body := mkAppM ``Option.elim #[result, default, litEval]
+      mkLambdaFVars #[x] (← body)
+    /- return ← Lean.Elab.throwUnsupportedSyntax -/
+  | _ => return ← Lean.Elab.throwUnsupportedSyntax
+
+elab s:state_expr : term => elabStateExpr s
+#eval ({x ← 2, y ← T}) (Var.mk "y")
 end WHILE
