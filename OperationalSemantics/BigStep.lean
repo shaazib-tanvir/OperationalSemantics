@@ -145,22 +145,22 @@ theorem big_step_while_iff'
 
 theorem big_step_deterministic (p : Program) (s t u : State) (hstep : (p, s) ▷ t ∧ (p, s) ▷ u) : t = u := by
   obtain ⟨ step₀, step₁ ⟩ := hstep
-  revert s t u
-  induction p with
-  | «skip» =>
+  generalize hps : (p, s) = ps at step₀ step₁
+  clear hps
+  induction step₀ generalizing u with
+  | «skip» => grind
+  | seq => grind
+  | cond_if => grind
+  | cond_else => grind
+  | while_false => grind
+  | while_true => grind
+  | @assignment s' v e he =>
+    clear s
+    rw [big_step_assignment_iff] at step₁
+    obtain ⟨ w, ⟨ he', step₁ ⟩ ⟩ := step₁
+    have h : he.choose = w := by
+      have h := Exists.choose_spec he
+      grind
     grind
-  | assignment v e =>
-    grind
-  | seq p₀ p₁ hp₀ hp₁ =>
-    intro s t u hp0 hp1
-    cases hp0 with | @seq _ v _ _ _ h0 h1
-    cases hp1 with | @seq _ v' _ _ _ h0' h1'
-    specialize hp₀ s v v'
-    specialize hp₁ v t u
-    grind
-  | cond e pif pelse hif helse =>
-    grind
-  | while_do e p hp =>
-    sorry
 
 end WHILELang
