@@ -2,7 +2,7 @@ import Lean
 import Lean.Meta
 import Std
 
-namespace WHILE
+namespace WHILELang
 
 def BoolLit := Bool
 deriving Repr
@@ -42,14 +42,14 @@ inductive Program where
   | assignment : Var → Expr → Program
   | seq : Program → Program → Program
   | cond : Expr → Program → Program → Program
-  | while : Expr → Program → Program
+  | while_do : Expr → Program → Program
 deriving Repr
 
 declare_syntax_cat while_lit
 
-syntax "T" : while_lit
-syntax "⊥" : while_lit
-syntax num : while_lit
+scoped syntax "T" : while_lit
+scoped syntax "⊥" : while_lit
+scoped syntax num : while_lit
 
 open Lean Lean.Meta in
 def elabLit (stx : Syntax) : MetaM Lean.Expr := do
@@ -66,7 +66,7 @@ elab "test_while_lit" x:while_lit : term => elabLit x
 
 declare_syntax_cat while_unary
 
-syntax "¬" : while_unary
+scoped syntax "¬" : while_unary
 
 open Lean Lean.Meta in
 def elabUnary (stx : Syntax) : MetaM Lean.Expr := do
@@ -79,11 +79,11 @@ elab "test_while_un" x:while_unary : term => elabUnary x
 
 declare_syntax_cat while_binary
 
-syntax " + " : while_binary
-syntax " - " : while_binary
-syntax " ∨ " : while_binary
-syntax " ∧ " : while_binary
-syntax " > " : while_binary
+scoped syntax " + " : while_binary
+scoped syntax " - " : while_binary
+scoped syntax " ∨ " : while_binary
+scoped syntax " ∧ " : while_binary
+scoped syntax " > " : while_binary
 
 open Lean Lean.Meta in
 def elabBinary (stx : Syntax) : MetaM Lean.Expr := do
@@ -99,11 +99,11 @@ elab "test_while_bin" x:while_binary : term => elabBinary x
 
 declare_syntax_cat while_expr
 
-syntax while_lit : while_expr
-syntax ident : while_expr
-syntax while_unary while_expr : while_expr
-syntax while_expr while_binary while_expr : while_expr
-syntax "(" while_expr ")" : while_expr
+scoped syntax while_lit : while_expr
+scoped syntax ident : while_expr
+scoped syntax while_unary while_expr : while_expr
+scoped syntax while_expr while_binary while_expr : while_expr
+scoped syntax "(" while_expr ")" : while_expr
 
 open Lean Lean.Meta in
 def identToVar (name : Lean.TSyntax `ident) : Lean.Expr := mkAppN (.const ``Var.mk []) #[mkStrLit name.getId.getString!]
@@ -129,11 +129,11 @@ elab "test_while_expr" e:while_expr : term => elabExpr e
 
 declare_syntax_cat while_program
 
-syntax "skip" : while_program
-syntax ident ":=" while_expr : while_program
-syntax while_program ";" while_program : while_program
-syntax "if" while_expr "then" while_program "else" while_program : while_program
-syntax "while" while_expr "do" while_program : while_program
+scoped syntax "skip" : while_program
+scoped syntax ident ":=" while_expr : while_program
+scoped syntax while_program ";" while_program : while_program
+scoped syntax "if" while_expr "then" while_program "else" while_program : while_program
+scoped syntax "while" while_expr "do" while_program : while_program
 
 open Lean Lean.Meta in
 partial def elabProgram (stx : Syntax) : MetaM Lean.Expr :=
@@ -147,10 +147,16 @@ partial def elabProgram (stx : Syntax) : MetaM Lean.Expr :=
   | `(while_program| if $b:while_expr then $s:while_program else $s':while_program) =>
     return mkAppN (.const ``Program.cond []) #[← elabExpr b, ← elabProgram s, ← elabProgram s']
   | `(while_program| while $b:while_expr do $s:while_program) =>
-    return mkAppN (.const ``Program.while []) #[← elabExpr b, ← elabProgram s]
+    return mkAppN (.const ``Program.while_do []) #[← elabExpr b, ← elabProgram s]
   | _ => Lean.Elab.throwUnsupportedSyntax
 
-elab "⟪ " p:while_program " ⟫" : term => elabProgram p
+scoped syntax (name := embedded_program) "⟪ " while_program " ⟫" : term
+open Lean Lean.Meta Lean.Elab in
+@[term_elab embedded_program]
+def embedded_programImpl : Term.TermElab := fun stx _ => do
+  match stx with
+  | `(embedded_program| ⟪ $p:while_program ⟫) => elabProgram p
+  | _ => throwError ""
 
 #eval ⟪
 if x > 2 then
@@ -159,7 +165,7 @@ if x > 2 then
 else x := x - 1
 ⟫
 
-#check ⟪ skip ⟫
+#eval ⟪ skip ⟫
 
 inductive Value where
   | bool : Bool → Value
@@ -200,15 +206,15 @@ def Expr.evalM [Monad m] (e : Expr) (s : State) (typeError : Unit → m Value) :
 def Expr.eval? (e : Expr) (s : State) : Option Value :=
   Expr.evalM e s (fun _ => none)
 
-syntax (name := evalExpr) "⟦" term ";" term "⟧" : term
+scoped syntax (name := evalExpr) "⟦" term ";" term "⟧" : term
 
 macro_rules
   | `(⟦$e:term ; $s:term⟧) => `(Expr.eval? $e $s)
 
 declare_syntax_cat state_decl
-syntax ident " ← " while_lit : state_decl
+scoped syntax ident " ← " while_lit : state_decl
 
-syntax (name := state_expr) "{" state_decl,* "}" : term
+scoped syntax (name := state_expr) "{" state_decl,* "}" : term
 
 def evalStateExpr (litList : List (String × Literal)) : State :=
   fun v => match (litList.find? (fun x => x.fst = v.ident)) with
@@ -250,4 +256,6 @@ def unexpandEvalStateExpr : PrettyPrinter.Unexpander
 elab s:state_expr : term => elabStateExpr s
 #check ({x ← 2, y ← T})
 
-end WHILE
+def State.sub (s : State) (x : Var) (v : Value) := fun y : Var => if x = y then v else s x
+
+end WHILELang
