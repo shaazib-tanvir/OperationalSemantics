@@ -1,10 +1,5 @@
 name = "OperationalSemantics"
 version = "0.1.0"
-defaultTargets = ["operationalsemantics"]
 
 [[lean_lib]]
 name = "OperationalSemantics"
-
-[[lean_exe]]
-name = "operationalsemantics"
-root = "Main"
